@@ -1,10 +1,8 @@
 import pg from 'pg';
-import chai from 'chai';
-import pgtypes from '../src';
+import { assert } from 'chai';
+import pgtypes from '../src/index.js';
 
-const should = chai.should();
-
-const connection = 'pg://postgres@localhost/pg_custom_types';
+const connection = process.env.DATABASE_URL || 'postgresql://postgres@localhost/pg_custom_types';
 
 const POSTGIS_TYPES = ['geometry', 'geography'];
 
@@ -15,11 +13,11 @@ describe('custom types', () => {
         return done(err);
       }
 
-      oids.geometry.should.be.a('number');
-      oids.geography.should.be.a('number');
+      assert.isNumber(oids.geometry);
+      assert.isNumber(oids.geography);
 
-      pgtypes.getTypeOID('geometry', 'postgis').should.be.a('number');
-      pgtypes.getTypeName(pgtypes.getTypeOID('geometry', 'postgis'), 'postgis').should.eql('geometry');
+      assert.isNumber(pgtypes.getTypeOID('geometry', 'postgis'));
+      assert.strictEqual(pgtypes.getTypeName(pgtypes.getTypeOID('geometry', 'postgis'), 'postgis'), 'geometry');
 
       done();
     });
@@ -31,9 +29,27 @@ describe('custom types', () => {
         return done(err);
       }
 
-      should.not.exist(oids.bogustype);
+      assert.isUndefined(oids.bogustype);
 
       done();
     });
+  });
+
+  it('allowNull returns null for null values', () => {
+    const parser = pgtypes.allowNull((v) => parseInt(v, 10));
+    assert.isNull(parser(null));
+    assert.isNull(parser(undefined));
+    assert.strictEqual(parser('42'), 42);
+  });
+
+  it('parseArray parses an array with the given parser', () => {
+    const parseIntArray = pgtypes.parseArray((v) => parseInt(v, 10));
+    const result = parseIntArray('{1,2,3}');
+    assert.deepEqual(result, [1, 2, 3]);
+  });
+
+  it('parseArray returns null for null input', () => {
+    const parseIntArray = pgtypes.parseArray((v) => parseInt(v, 10));
+    assert.isNull(parseIntArray(null));
   });
 });
