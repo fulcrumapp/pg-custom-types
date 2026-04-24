@@ -1,5 +1,5 @@
 import pgformat from 'pg-format';
-import array from 'postgres-array';
+import { parse as parseArray } from 'postgres-array';
 
 const OIDS = {};
 const NAMES = {};
@@ -20,7 +20,7 @@ export default function fetch(execute, uniqueKey, types, callback) {
     OIDS[uniqueKey] = {};
     NAMES[uniqueKey] = {};
 
-    for (let row of rows) {
+    for (const row of rows) {
       OIDS[uniqueKey][row.name] = +row.oid;
       NAMES[uniqueKey][+row.oid] = row.name;
     }
@@ -29,22 +29,15 @@ export default function fetch(execute, uniqueKey, types, callback) {
   });
 }
 
-fetch.fetcher = function (pg, connection) {
+fetch.fetcher = function (pg, connectionString) {
+  const pool = new pg.Pool({ connectionString });
+
   return (sql, callback) => {
-    pg.connect(connection, (err, client, done) => {
+    pool.query(sql, (err, result) => {
       if (err) {
         return callback(err);
       }
-
-      client.query(sql, null, (err, result) => {
-        done();
-
-        if (err) {
-          return callback(err);
-        }
-
-        callback(null, result.rows);
-      });
+      callback(null, result.rows);
     });
   };
 };
@@ -70,5 +63,5 @@ fetch.getTypeOID = function (name, key) {
 };
 
 fetch.parseArray = function (parser) {
-  return fetch.allowNull((value) => array.parse(value, fetch.allowNull(parser)));
+  return fetch.allowNull((value) => parseArray(value, fetch.allowNull(parser)));
 };
