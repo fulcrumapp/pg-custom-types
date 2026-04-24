@@ -27,8 +27,10 @@ export default [
       globals: {
         describe: 'readonly',
         it: 'readonly',
-        before: 'readonly',
-        after: 'readonly',
+        test: 'readonly',
+        expect: 'readonly',
+        beforeAll: 'readonly',
+        afterAll: 'readonly',
         beforeEach: 'readonly',
         afterEach: 'readonly',
       },

@@ -9,7 +9,7 @@
     ".": "./src/index.js"
   },
   "scripts": {
-    "test": "node_modules/.bin/mocha test/postgis.js",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest",
     "lint": "node_modules/.bin/eslint src test"
   },
   "author": "Zac McCormick <zac.mccormick@gmail.com> (http://github.com/zhm)",
@@ -26,9 +26,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "chai": "^5.2.0",
     "eslint": "^10.2.1",
-    "mocha": "^11.7.5",
+    "jest": "^30.3.0",
     "pg": "^8.20.0"
   },
   "dependencies": {
