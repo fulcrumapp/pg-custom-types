@@ -1,4 +1,4 @@
-# pg-custom-types [![Build Status](https://travis-ci.org/zhm/pg-custom-types.svg?branch=master)](https://travis-ci.org/zhm/pg-custom-types)
+# pg-custom-types
 
 Use custom data types with [node-postgres](https://github.com/brianc/node-postgres).
 
