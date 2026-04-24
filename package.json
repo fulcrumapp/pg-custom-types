@@ -1,6 +1,6 @@
 {
   "name": "@fulcrumapp/pg-custom-types",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "description": "Custom data types for node-postgres",
   "homepage": "https://github.com/fulcrumapp/pg-custom-types",
   "type": "module",
