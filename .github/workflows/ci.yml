@@ -110,9 +110,24 @@ jobs:
       - name: Test
         run: npm test
 
+  build-and-test:
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require lint and tests to succeed
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          if [ "$LINT_RESULT" != success ] || [ "$TEST_RESULT" != success ]; then
+            echo "::error::Lint result: $LINT_RESULT; test result: $TEST_RESULT"
+            exit 1
+          fi
+
   tag:
     name: Create npm release tag
-    needs: [lint, test]
+    needs: build-and-test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     concurrency:
