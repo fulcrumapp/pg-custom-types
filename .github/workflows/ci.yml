@@ -1,42 +1,44 @@
 name: CI
 
 on:
-  push:
-    branches: ['**']
   pull_request:
     branches: ['**']
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'push' && github.run_id || github.event_name }}
+  cancel-in-progress: true
 
 jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Use Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Lint
-        run: npm run lint
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
 
   test:
     name: Test (Node ${{ matrix.node-version }})
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
+    timeout-minutes: 20
     strategy:
       matrix:
         node-version: ['18', '20', '22']
-
     services:
       postgres:
         image: postgis/postgis:16-3.4
@@ -51,30 +53,104 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
     env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pg_custom_types
-
+      DATABASE_URL: postgresql://postgres@localhost:5432/pg_custom_types
+      PGPASSWORD: postgres
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node-version }}
-          cache: 'npm'
+          cache: npm
+
+      - name: Protect release-managed version
+        if: github.event_name == 'merge_group' || github.base_ref == 'main' || github.ref == 'refs/heads/main'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: |
+          node <<'NODE'
+          const { execFileSync } = require('node:child_process');
+          const base = process.env.BASE_SHA || '';
+          if (!/^[0-9a-f]{40,64}$/.test(base) || /^0+$/.test(base)) {
+            console.error('::error::Cannot determine the base commit for the release version check.');
+            process.exit(1);
+          }
+          function version(ref) {
+            let manifest;
+            try {
+              manifest = JSON.parse(execFileSync('git', ['show', `${ref}:package.json`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+            } catch (error) {
+              console.error(`::error::Cannot read or parse package.json at ${ref}: ${error.message}`);
+              process.exit(1);
+            }
+            if (!manifest || typeof manifest.version !== 'string' || !manifest.version.trim()) {
+              console.error(`::error::package.json at ${ref} must have a nonempty version string.`);
+              process.exit(1);
+            }
+            return manifest.version;
+          }
+          if (version(base) !== version('HEAD')) {
+            console.error('::error file=package.json::Do not manually change the root package.json version. Revert that version change; GitHub Actions manages release versions.');
+            process.exit(1);
+          }
+          NODE
+
+      - name: Test release workflow contracts
+        run: node --test .github/tests/*.cjs
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
-      - name: Wait for PostgreSQL with PostGIS
-        run: |
-          until psql "$DATABASE_URL" -c '\q' 2>/dev/null; do
-            echo "Waiting for postgres..."
-            sleep 2
-          done
-        env:
-          PGPASSWORD: postgres
-
-      - name: Run tests
+      - name: Test
         run: npm test
+
+  build-and-test:
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require lint and tests to succeed
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          if [ "$LINT_RESULT" != success ] || [ "$TEST_RESULT" != success ]; then
+            echo "::error::Lint result: $LINT_RESULT; test result: $TEST_RESULT"
+            exit 1
+          fi
+
+  tag:
+    name: Create npm release tag
+    needs: build-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.repository }}-npm-release-tag
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22.14.0'
+      - name: Create scoped GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ secrets.FULCRUM_CI_APP_ID_PUBLIC }}
+          private-key: ${{ secrets.FULCRUM_CI_APP_PRIVATE_KEY_PUBLIC }}
+          permission-contents: write
+      - name: Commit release version to main and tag it
+        uses: ./.github/actions/npm-create-tag
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          CHECK_NPMJS: 'false'
